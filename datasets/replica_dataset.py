@@ -88,8 +88,12 @@ class ReplicaDataset(Dataset):
             self.final_k = len(self.poses) - 1
 
         # Parse images and tfs
-        for i, (image_path, depth_path) in enumerate(tqdm(zip(self.image_paths, self.depth_paths))):
-                
+        print(f'Loading {len(self.image_paths)} images and tfs')
+        self.tqdm = tqdm(total=len(self.image_paths), desc='Loading dataset')
+        for i, (image_path, depth_path) in enumerate(zip(self.image_paths, self.depth_paths)):
+            
+            self.tqdm.update(1)
+
             if ((i-self.initial_k) % self.img_stride) != 0 or i < self.initial_k or i > self.final_k:
                 continue
 
@@ -131,9 +135,9 @@ class ReplicaDataset(Dataset):
             subset_poses    += [self.poses[i]]
 
             # Early break if we've exceeded the buffer max
-            if len(self.images) == self.args.buffer:
-                break
-
+            # if len(self.images) == self.args.buffer:
+            #     break
+        self.tqdm.close()
         self.poses = subset_poses
 
         self.timestamps = np.array(self.timestamps)

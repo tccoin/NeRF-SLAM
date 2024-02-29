@@ -57,6 +57,10 @@ def parse_args():
 
     parser.add_argument("--eval", action="store_true", help="Evaluate method.")
 
+    parser.add_argument("--output", type=str, default='output')
+
+    parser.add_argument("--profile", action="store_true", default=False)
+
     return parser.parse_args()
 
 def run(args):
@@ -168,20 +172,32 @@ def run(args):
     else:
         print("Running pipeline in sequential mode.")
 
-        # Initialize all modules first (and register 3D volume)
-        if data_provider_module.spin() \
-            and (not slam or slam_module.spin()) \
-            and (not fusion or fusion_module.spin()):
-            if gui:
-                gui_module.spin()
-                #gui_module.register_volume(fusion_module.fusion.volume)
-
         # Run sequential, dataprovider fills queue and gui empties it
-        while data_provider_module.spin() \
-            and (not slam or slam_module.spin()) \
-            and (not fusion or fusion_module.spin()) \
-            and (not gui or gui_module.spin()):
+        while data_provider_module.spin():
             continue
+        if slam:
+            while slam_module.spin():
+                continue
+        while True:
+            continue
+
+        if fusion:
+            while fusion_module.spin():
+                continue
+
+        # Initialize all modules first (and register 3D volume)
+        # if data_provider_module.spin() \
+        #     and (not slam or slam_module.spin()) \
+        #     and (not fusion or fusion_module.spin()):
+        #     if gui:
+        #         gui_module.spin()
+        #         #gui_module.register_volume(fusion_module.fusion.volume)
+
+        # while data_provider_module.spin() \
+        #     and (not slam or slam_module.spin()) \
+        #     and (not fusion or fusion_module.spin()) \
+        #     and (not gui or gui_module.spin()):
+        #     continue
 
         # Then gui runs indefinitely until user closes window
         ok = True
@@ -193,6 +209,7 @@ def run(args):
 
 if __name__ == '__main__':
     args = parse_args()
+    os.makedirs(args.output, exist_ok=True)
 
     torch.multiprocessing.set_start_method('spawn')
     torch.cuda.empty_cache()

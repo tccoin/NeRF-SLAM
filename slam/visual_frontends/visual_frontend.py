@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from abc import abstractclassmethod
-
+from tqdm import tqdm
 from collections import OrderedDict
 
 from icecream import ic
@@ -63,6 +63,8 @@ class RaftVisualFrontend(VisualFrontend):
     def __init__(self, world_T_body_t0, body_T_cam0, args, device="cpu"):
         super().__init__()
         self.args = args
+
+        self.tqdm = tqdm(total=args.buffer, desc='RaftVisualFrontend')
 
         self.kf_idx = 0 # Keyframe index
         self.kf_idx_to_f_idx = {} # Keyframe index to frame index 
@@ -240,7 +242,7 @@ class RaftVisualFrontend(VisualFrontend):
     def forward(self, batch):
         # The output of RaftVisualFrontend is not dense optical flow
         # but rather a bunch of pose-to-pose factors resulting from the reduced camera matrix.
-        print("RaftVisualFrontend.forward")
+        # print("RaftVisualFrontend.forward")
 
         k = batch["k"][0]
 
@@ -291,16 +293,20 @@ class RaftVisualFrontend(VisualFrontend):
         assert k > 0
         assert self.kf_idx < self.buffer
 
+        self.tqdm.update(1)
+        self.tqdm.set_description(f'adding keyframe: {self.kf_idx}')
+
+        if batch["is_last_frame"]:
+            self.kf_idx -= 1 # Because in the last iter we increased it, but aren't taking any...
+            print("Last frame reached, and no new motion: starting GLOBAL BA")
+            self.terminate()
+            # Send the whole viz_out to update the fact that BA has changed all poses/depths
+            viz_out = self.get_viz_out(batch)
+            return x0, factors, viz_out
+    
         # Add frame as keyframe if we have enough motion, otherwise discard:
         current_imgs_features = self.__feature_encoder(imgs_norm_k)
         if not self.has_enough_motion(current_imgs_features):
-            if batch["is_last_frame"]:
-                self.kf_idx -= 1 # Because in the last iter we increased it, but aren't taking any...
-                print("Last frame reached, and no new motion: starting GLOBAL BA")
-                self.terminate()
-                # Send the whole viz_out to update the fact that BA has changed all poses/depths
-                viz_out = self.get_viz_out(batch)
-                return x0, factors, viz_out
             # By returning, we do not increment self.kf_idx
             return x0, factors, viz_out
 
@@ -435,7 +441,7 @@ class RaftVisualFrontend(VisualFrontend):
             # Or rather the factors?
 
             # Dense bundle adjustment
-            ic("BA!")
+            # ic("BA!")
             x0, rcm_factor = self.ba(gru_estimated_flow, gru_estimated_flow_weight, damping,
                                  ii, jj, kf0, kf1, itrs=itrs, lm=1e-4, ep=0.1,
                                  motion_only=motion_only, compute_covariances=self.compute_covariances)
@@ -977,7 +983,7 @@ class RaftVisualFrontend(VisualFrontend):
     @torch.no_grad()
     def has_enough_motion(self, current_imgs_features):
         # Only calculates if enough motion by looking at cam0
-        ic(self.last_kf_idx)
+        # ic(self.last_kf_idx)
         last_img_features    = self.features_imgs[self.last_kf_idx][0]
         current_img_features = current_imgs_features[0]
         last_img_context     = self.contexts_imgs[self.last_kf_idx][0]
@@ -1135,7 +1141,7 @@ class RaftVisualFrontend(VisualFrontend):
 
             # Add Factors
             if initial_priors is not None:
-                ic("ADDING initial prior!")
+                # ic("ADDING initial prior!")
                 linear_factor_graph.push_back(initial_priors.linearize(x0))
 
             # SOLVE
@@ -1332,12 +1338,20 @@ class RaftVisualFrontend(VisualFrontend):
             print("Not running global BA...")
             torch.cuda.empty_cache()
 
+        stamps = np.array(list(self.kf_idx_to_f_idx.values()))[..., np.newaxis] * self.args.img_stride
+        ttraj = np.concatenate([stamps[:self.kf_idx+1], self.world_T_body[:self.kf_idx+1].cpu().numpy()], axis=1)
+        np.savetxt(f'{self.args.output}/traj_viokf.txt', ttraj, fmt='%.6f')
+
         self.stop = True
 
     def get_viz_out(self, batch):
         viz_index, = torch.where(self.viz_idx)
         viz_out = None
-        if len(viz_index) != 0:
+        if batch["is_last_frame"]:
+            ic("Last frame")
+            # Leave all the entries null, this signals end of seq
+            viz_out = {"is_last_frame": True}
+        elif len(viz_index) != 0:
             cam0_T_world       = torch.index_select(self.cam0_T_world, 0, viz_index)
             gt_poses           = torch.index_select(self.gt_poses, 0, viz_index)
             gt_depths          = torch.index_select(self.gt_depths, 0, viz_index)
@@ -1359,7 +1373,7 @@ class RaftVisualFrontend(VisualFrontend):
             else:
                 out_device = self.device
 
-            ic(out_device)
+            # ic(out_device)
 
             viz_out = {"cam0_poses":          cam0_T_world.to(device=out_device),
                        "gt_poses":            gt_poses.to(device=out_device),
@@ -1381,12 +1395,6 @@ class RaftVisualFrontend(VisualFrontend):
                        "is_last_frame":       batch["is_last_frame"]
                       }
             self.viz_idx[:] = False
-        else:
-            print("viz_index is empty, nothing to visualize")
-            if batch["is_last_frame"]:
-                ic("Last frame")
-                # Leave all the entries null, this signals end of seq
-                viz_out = {"is_last_frame": True}
             
         return viz_out
         

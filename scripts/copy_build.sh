@@ -1,0 +1,1 @@
+rsync -av --ignore-existing ~/slam_lib/NeRF-SLAM/* .

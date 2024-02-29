@@ -2,7 +2,8 @@ from abc import abstractmethod
 import colored_glog as log
 from icecream import ic
 
-#from torch.profiler import profile, ProfilerActivity
+import torch
+from torch.profiler import profile, ProfilerActivity
 
 class PipelineModuleBase:
     def __init__(self, name, parallel_run, args=None, grad=False):
@@ -15,7 +16,7 @@ class PipelineModuleBase:
         self.args = args # arguments to init module
         # Callbacks to be called in case module does not return an output.
         self.on_failure_callbacks = []
-        self.profile = False # Profile the code for runtime and/or memory
+        self.profile = args.profile # Profile the code for runtime and/or memory
 
     @abstractmethod
     def initialize_module(self):
@@ -87,6 +88,17 @@ class PipelineModule(PipelineModuleBase):
         if not self.is_initialized:
             self.initialize_module()
 
+        if self.profile:
+            prof = profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                profile_memory=True,
+                record_shapes=True,
+                with_stack=True
+                )
+            
+            prof.__enter__()
+            torch.cuda.memory._record_memory_history()
+            
         while not self.shutdown:
             self.is_thread_working = False;
             input = self.get_input_packet();
@@ -94,9 +106,8 @@ class PipelineModule(PipelineModuleBase):
             if input is not None:
                 output = None
                 if self.profile:
-                    #with profile(activities=[ProfilerActivity.CUDA], profile_memory=True, record_shapes=True) as prof:
+                    prof.step()
                     output = self.spin_once(input);
-                    #print(prof.key_averages().table(sort_by="self_cuda_memory_usage", row_limit=10))
                 else:
                     output = self.spin_once(input);
                 if output is not None:
@@ -115,9 +126,17 @@ class PipelineModule(PipelineModuleBase):
             # Break the while loop if we are in sequential mode.
             if not self.parallel_run:
                 self.is_thread_working = False;
-                return True;
-
-        self.is_thread_working = False;
+                return True
+        if self.profile:
+            torch.cuda.memory._dump_snapshot(f"log/memory_{self.name}.pickle")
+            prof.__exit__(None, None, None)
+            # prof.export_memory_timeline(f"log/memory_{self.name}.html")
+            # prof.export_chrome_trace(f'log/trace_{self.name}.json')
+            print(prof.key_averages().table(sort_by="self_cuda_memory_usage", row_limit=10))
+            # save the key_averages
+            with open(f'log/profile_{self.name}.txt', 'w') as f:
+                f.write(prof.key_averages().table(sort_by="self_cuda_memory_usage", row_limit=10))
+        self.is_thread_working = False
         log.info(f"Module: {self.name} - Successful shutdown.")
         return False;
 

@@ -263,9 +263,11 @@ def viz_idepth(disps, upmask, fix_range=False):
     depth = 1.0 / disps_up[-1].squeeze().to(torch.float) # Visualize only the last depth...
     viz_depth_map(depth, fix_range)
 
-def viz_depth_map(depth, fix_range=False, name='Depth up', invert=True, colormap=cv2.COLORMAP_PLASMA, write=False):
+def viz_depth_map(depth, fix_range=False, name='Depth up', invert=True, colormap=cv2.COLORMAP_PLASMA, write=False, range=None):
     valid = (depth > 0) & (~torch.isinf(depth)) & (~torch.isnan(depth)) # one shouldn't use exact equality on floats but for synthetic values it's ok
-    if fix_range:
+    if range is not None:
+        dmin, dmax = range
+    elif fix_range:
         dmin, dmax = 0.0, 3.0
     else:
         if valid.any():
