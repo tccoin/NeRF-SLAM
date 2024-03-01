@@ -313,7 +313,7 @@ class NerfFusion:
     def fit_volume_once(self):
         self.ngp.frame()
         dt = self.ngp.elapsed_training_time
-        #print(f"Iter={self.total_iters}; Dt={dt}; Loss={self.ngp.loss}")
+        # print(f"Iter={self.total_iters}; Dt={dt}; Loss={self.ngp.loss}")
         if self.anneal and self.total_iters % self.anneal_every_iters == 0:
             self.ngp.nerf.training.depth_supervision_lambda *= self.annealing_rate
         if self.evaluate and self.total_iters % self.eval_every_iters == 0:
@@ -392,7 +392,7 @@ class NerfFusion:
         #ic(self.ngp.nerf.training.dataset.transforms[0].end)
 
     def eval_gt_traj(self):
-        ic(self.total_iters)
+        # ic(self.total_iters)
 
         spp = 1 # samples per pixel
         linear = True
@@ -489,7 +489,7 @@ class NerfFusion:
         dt = self.ngp.elapsed_training_time
         psnr = total_psnr / (count or 1)
         l1 = total_l1 / (count or 1)
-        # print(f"Iter={self.total_iters}; Dt={dt}; PSNR={psnr}; L1={l1}; count={count}")
+        print(f"Iter={self.total_iters}; Dt={dt}; PSNR={psnr}; L1={l1}; count={count}")
         self.df.loc[len(self.df.index)] = [self.total_iters, dt, psnr, l1, count]
         # self.df.to_csv("results.csv")
         self.df.to_csv(f"{self.args.output}/results_ngp.csv")
