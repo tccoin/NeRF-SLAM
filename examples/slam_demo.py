@@ -178,8 +178,16 @@ def run(args):
         if slam:
             while slam_module.spin():
                 continue
-        while True:
-            continue
+            torch.cuda.empty_cache()
+            print(f'queue size: {slam_output_queue_for_fusion.qsize()}')
+
+        # import gc
+        # for obj in gc.get_objects():
+        #     try:
+        #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+        #             del obj
+        #     except: pass
+        # torch.cuda.empty_cache()
 
         if fusion:
             while fusion_module.spin():
@@ -216,5 +224,12 @@ if __name__ == '__main__':
     torch.backends.cudnn.benchmark = True
     torch.set_grad_enabled(False)
 
+
+    # import sys
+    # from gpu_profile import trace_calls
+    # os.environ['GPU_DEBUG'] = "0"
+    # os.environ['TRACE_INTO'] = '_frontend forward123 __init123 __update123'
+    # sys.settrace(trace_calls)
+    
     run(args)
     print('Done...')

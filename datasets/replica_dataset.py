@@ -63,7 +63,7 @@ class ReplicaDataset(Dataset):
         self.poses       = self.load_poses(f'{self.dataset_dir}/traj.txt')
         self.calib       = self._get_cam_calib(f'{self.dataset_dir}/../cam_params.json')
 
-        N = self.args.buffer
+        # N = self.args.buffer
         H, W = self.calib.resolution.height, self.calib.resolution.width
 
         self.resize_images = False
@@ -89,13 +89,13 @@ class ReplicaDataset(Dataset):
 
         # Parse images and tfs
         print(f'Loading {len(self.image_paths)} images and tfs')
-        self.tqdm = tqdm(total=len(self.image_paths), desc='Loading dataset')
+        self.tqdm = tqdm(total=len(self.image_paths)/self.img_stride, desc='Loading dataset')
         for i, (image_path, depth_path) in enumerate(zip(self.image_paths, self.depth_paths)):
-            
-            self.tqdm.update(1)
 
             if ((i-self.initial_k) % self.img_stride) != 0 or i < self.initial_k or i > self.final_k:
                 continue
+            
+            self.tqdm.update(1)
 
             # Parse rgb/depth images
             image = cv2.imread(image_path)
@@ -137,6 +137,7 @@ class ReplicaDataset(Dataset):
             # Early break if we've exceeded the buffer max
             # if len(self.images) == self.args.buffer:
             #     break
+
         self.tqdm.close()
         self.poses = subset_poses
 

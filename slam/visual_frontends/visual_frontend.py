@@ -4,6 +4,7 @@ from abc import abstractclassmethod
 from tqdm import tqdm
 from collections import OrderedDict
 
+
 from icecream import ic
 import cv2
 
@@ -64,7 +65,7 @@ class RaftVisualFrontend(VisualFrontend):
         super().__init__()
         self.args = args
 
-        self.tqdm = tqdm(total=args.buffer, desc='RaftVisualFrontend')
+        self.tqdm = tqdm()
 
         self.kf_idx = 0 # Keyframe index
         self.kf_idx_to_f_idx = {} # Keyframe index to frame index 
@@ -361,6 +362,7 @@ class RaftVisualFrontend(VisualFrontend):
             cv2.waitKey(1)
 
         if self.kf_idx + 1 >= self.buffer or batch["is_last_frame"]:
+            self.tqdm.close()
             print("Buffer full or last frame reached: starting GLOBAL BA")
             self.terminate()
             viz_out = self.get_viz_out(batch)

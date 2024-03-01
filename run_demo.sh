@@ -6,4 +6,7 @@
 # python3 ./examples/slam_demo.py --dataset_dir=/home/junzhe/dataset/Replica/office0 --dataset_name=replica --buffer=50 --slam --parallel_run --img_stride=2 --fusion=''
 
 #eval
-python3 examples/slam_demo.py --dataset_dir=/home/junzhe/dataset/Replica/office0 --dataset_name=replica --buffer=500 --slam --img_stride=2 --fusion='nerf' --gui --eval
+python3 examples/slam_demo.py --dataset_dir=/home/junzhe/dataset/Replica/office0 --dataset_name=replica --buffer=1000 --slam --img_stride=2 --fusion='nerf' --gui --eval
+
+# 100 8.3G
+# 200
