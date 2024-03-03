@@ -1,4 +1,3 @@
-
 import glob
 import os
 import json
@@ -8,11 +7,11 @@ import cv2
 from tqdm import tqdm
 
 from icecream import ic
-from datasets.dataset import * 
+from datasets.dataset import Dataset, Resolution, PinholeCameraModel, RadTanDistortionModel, CameraCalibration
 
-class ReplicaDataset(Dataset):
+class KITTIOdomDataset(Dataset):
     def __init__(self, args, device):
-        super().__init__("Replica", args, device)
+        super().__init__("KITTIOdom", args, device)
         self.dataset_dir = args.dataset_dir
         self.parse_dataset()
         self._build_dataset_index()
@@ -22,11 +21,11 @@ class ReplicaDataset(Dataset):
         with open(path, "r") as f:
             lines = f.readlines()
         f = open(f'{self.args.output}/gt_traj.txt', 'w')
-        for i in range(len(self.image_paths)):
-            line = lines[i]
-            c2w = np.array(list(map(float, line.split()))).reshape(4, 4)
-            c2w[:3, 1] *= -1
-            c2w[:3, 2] *= -1
+        for i, line in enumerate(lines):
+            c2w = np.eye(4)
+            c2w[:3,:] = np.array(list(map(float, line.split()))).reshape(3, 4)
+            # c2w[:3, 1] *= -1
+            # c2w[:3, 2] *= -1
             import scipy.spatial.transform
             q = scipy.spatial.transform.Rotation.from_matrix(c2w[:3, :3]).as_quat()
             f.write(f'{i} {c2w[0, 3]} {c2w[1, 3]} {c2w[2, 3]} {q[0]} {q[1]} {q[2]} {q[3]}\n')
@@ -63,9 +62,9 @@ class ReplicaDataset(Dataset):
         self.depths     = []
         self.calibs     = []
 
-        self.image_paths = sorted(glob.glob(f'{self.dataset_dir}/results/frame*.jpg'))
-        self.depth_paths = sorted(glob.glob(f'{self.dataset_dir}/results/depth*.png'))
-        self.poses       = self.load_poses(f'{self.dataset_dir}/traj.txt')
+        self.image_paths = sorted(glob.glob(f'{self.dataset_dir}/image_2/*.png')) #left
+        self.depth_paths = sorted(glob.glob(f'{self.dataset_dir}/image_d/*.png'))
+        self.poses       = self.load_poses(f'{self.dataset_dir}/groundtruth.txt')
         self.calib       = self._get_cam_calib(f'{self.dataset_dir}/../cam_params.json')
 
         # N = self.args.buffer
@@ -75,7 +74,7 @@ class ReplicaDataset(Dataset):
         if self.calib.resolution.total() > 640*640:
             self.resize_images = True
             # TODO(Toni): keep aspect ratio, and resize max res to 640
-            self.output_image_size = [341, 640] # h, w 
+            self.output_image_size = [640, 193] # h, w 
 
         if self.resize_images:
             h0, w0  = self.calib.resolution.height, self.calib.resolution.width
@@ -87,7 +86,7 @@ class ReplicaDataset(Dataset):
             self.calib.camera_model.scale_intrinsics(self.w1 / w0, self.h1 / h0)
             self.calib.resolution = Resolution(self.w1, self.h1)
 
-        subset_poses = []        
+        subset_poses = []    
 
         if self.final_k == -1:
             self.final_k = len(self.poses) - 1
@@ -99,14 +98,14 @@ class ReplicaDataset(Dataset):
 
             if ((i-self.initial_k) % self.img_stride) != 0 or i < self.initial_k or i > self.final_k:
                 continue
-            
+
             self.tqdm.update(1)
 
             # Parse rgb/depth images
             image = cv2.imread(image_path)
             depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
 
-            #depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)[..., None] # H, W, C=1            
+
 
             if self.resize_images:
                 w1, h1 = self.w1, self.h1
@@ -114,43 +113,48 @@ class ReplicaDataset(Dataset):
                 image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA) # Required for Nerf Fusion, perhaps we can put it in there
 
                 depth = cv2.resize(depth, (w1, h1))
-                depth = depth[:, :, np.newaxis]
 
                 if self.viz:
                     cv2.imshow(f"Img Resized", image)
                     cv2.imshow(f"Depth Resized", depth)
                     cv2.waitKey(1)
-            
+    
+            depth = depth[:, :, np.newaxis]
+
             H, W, _  = depth.shape
+
             assert(H == image.shape[0])
             assert(W == image.shape[1])
             assert(3 == image.shape[2] or 4 == image.shape[2])
             assert(np.uint8 == image.dtype)
-            assert(H == depth.shape[0])
-            assert(W == depth.shape[1])
             assert(1 == depth.shape[2])
             assert(np.uint16 == depth.dtype)
 
-            depth = depth.astype(np.int32) # converting to int32, because torch does not support uint16, and I don't want to lose precision
+            depth = depth.astype(np.int32) 
 
             self.timestamps += [i]
             self.images     += [image]
             self.depths     += [depth]
-            self.calibs     += [self.calib]
             subset_poses    += [self.poses[i]]
-
-            # Early break if we've exceeded the buffer max
-            # if len(self.images) == self.args.buffer:
-            #     break
 
         self.tqdm.close()
         self.poses = subset_poses
+
+        # poses_t = np.array([x[:3,3].flatten() for x in self.poses])
+        # delta_t = 2.0
+        # t_max = np.amax(poses_t, 0).flatten()
+        # t_min = np.amin(poses_t, 0).flatten()
+        # aabb = np.array([t_min-delta_t, t_max+delta_t]).tolist()
+        aabb = np.array([[-5]*3, [5]*3]).tolist()
+        self.calib.aabb = aabb
+        ic(aabb)
+
 
         self.timestamps = np.array(self.timestamps)
         self.poses      = np.array(self.poses)
         self.images     = np.array(self.images)
         self.depths     = np.array(self.depths)
-        self.calibs     = np.array(self.calibs)
+        self.calibs     = np.array([self.calib]*len(self.images))
 
         N = len(self.timestamps)
         assert(N == self.poses.shape[0])
@@ -165,7 +169,7 @@ class ReplicaDataset(Dataset):
         return self.data_packets[k] if self.data_packets is not None else self._get_data_packet(k)
 
     def _get_data_packet(self, k0, k1=None):
-        if k1 is None: 
+        if k1 is None:
             k1 = k0 + 1
         else:
             assert(k1 >= k0)
@@ -178,9 +182,7 @@ class ReplicaDataset(Dataset):
                 "is_last_frame": (k0 >= self.__len__() - 1),
                 }
 
-    # Up to you how you index the dataset depending on your training procedure
     def _build_dataset_index(self):
-        # Go through the stream and bundle as you wish
         self.data_packets = [data_packet for data_packet in self.stream()]
 
     def stream(self):
@@ -202,7 +204,6 @@ class ReplicaDataset(Dataset):
             "cy": self.calib.camera_model.cy,
             "w": self.calib.resolution.width,
             "h": self.calib.resolution.height,
-            # TODO(Toni): calculate this automatically. Box that fits all cameras +2m
             "aabb": self.calib.aabb,
             "aabb_scale": AABB_SCALE,
             "integer_depth_scale": self.calib.depth_scale,
@@ -226,8 +227,8 @@ class ReplicaDataset(Dataset):
             c2w = np.linalg.inv(w2c)
 
             # Convert from opencv convention to nerf convention
-            c2w[0:3, 1] *= -1  # flip the y axis
-            c2w[0:3, 2] *= -1  # flip the z axis
+            # c2w[0:3, 1] *= -1  # flip the y axis
+            # c2w[0:3, 2] *= -1  # flip the z axis
 
             poses_t += [w2c[:3,3].flatten()]
 
@@ -237,7 +238,7 @@ class ReplicaDataset(Dataset):
             out["frames"].append(frame)
 
         poses_t = np.array(poses_t)
-        delta_t = 1.0 # 1 meter extra to allow for the depth of the camera
+        delta_t = 2.0 # 1 meter extra to allow for the depth of the camera
         t_max = np.amax(poses_t, 0).flatten()
         t_min = np.amin(poses_t, 0).flatten()
         out["aabb"] = np.array([t_min-delta_t, t_max+delta_t]).tolist()

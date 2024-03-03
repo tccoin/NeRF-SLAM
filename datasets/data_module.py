@@ -38,6 +38,13 @@ class DataModule(MIMOPipelineModule):
         elif self.name == "replica":
             from datasets.replica_dataset import ReplicaDataset
             self.dataset = ReplicaDataset(self.args, self.device)
+        elif self.name == "kitti_odom":
+            from datasets.kitti_odom_dataset import KITTIOdomDataset
+            self.dataset = KITTIOdomDataset(self.args, self.device)
+        elif self.name == "tartanair":
+            pass
+            # from datasets.kitti360_dataset import KITTI360Dataset
+            # self.dataset = KITTI360Dataset(self.args, self.device)
         elif self.name == "real":
             from datasets.real_sense_dataset import RealSenseDataset
             self.dataset = RealSenseDataset(self.args, self.device)

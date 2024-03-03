@@ -295,7 +295,7 @@ class RaftVisualFrontend(VisualFrontend):
         assert self.kf_idx < self.buffer
 
         self.tqdm.update(1)
-        self.tqdm.set_description(f'adding keyframe: {self.kf_idx}')
+        self.tqdm.set_description(f'adding keyframe {self.kf_idx}')
 
         if batch["is_last_frame"]:
             self.kf_idx -= 1 # Because in the last iter we increased it, but aren't taking any...

@@ -52,7 +52,7 @@ class NerfFusion:
         self.iters = 1
         self.iters_if_none = 1
         self.total_iters = 0
-        self.stop_iters  = 25000 #10000?
+        self.stop_iters  = 10000
         self.old_training_step = 0
 
         mode = ngp.TestbedMode.Nerf
@@ -81,7 +81,7 @@ class NerfFusion:
             while sw*sh > 1920*1080*4:
                 sw = int(sw / 2)
                 sh = int(sh / 2)
-            self.ngp.init_window(640, 480, second_window=False)
+            self.ngp.init_window(sw, sh, second_window=False)
 
             # Gui params:
             self.ngp.display_gui = True
@@ -112,7 +112,7 @@ class NerfFusion:
         self.annealing_rate = 0.95
 
         self.evaluate = args.eval
-        self.eval_every_iters = 2500
+        self.eval_every_iters = 1000
         if self.evaluate:
             self.df = pandas.DataFrame(columns=['Iter', 'Dt','PSNR', 'L1', 'count'])
 
