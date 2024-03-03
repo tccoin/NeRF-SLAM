@@ -285,8 +285,6 @@ class NerfFusion:
         focal_length = intrinsics[:2]
         principal_point = intrinsics[2:]
 
-        # TODO: we need to restore the self.ref_frames[frame_id] = [image, gt, etc] for evaluation....
-
         for i, id in enumerate(frame_ids):
             self.ref_frames[id.item()] = [images[i], depths[i], gt_depths[i], depths_cov[i]]
 

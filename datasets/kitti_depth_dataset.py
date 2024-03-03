@@ -59,9 +59,11 @@ class KITTIOdomDataset(Dataset):
         self.timestamps = []
         self.poses      = []
         self.images     = []
+        self.depths     = []
         self.calibs     = []
 
         self.image_paths = sorted(glob.glob(f'{self.dataset_dir}/image_2/*.png')) #left
+        self.depth_paths = sorted(glob.glob(f'{self.dataset_dir}/image_d/*.png'))
         self.poses       = self.load_poses(f'{self.dataset_dir}/groundtruth.txt')
         self.calib       = self._get_cam_calib(f'{self.dataset_dir}/../cam_params.json')
 
@@ -92,32 +94,47 @@ class KITTIOdomDataset(Dataset):
         # Parse images and tfs
         print(f'Loading {len(self.image_paths)} images and tfs')
         self.tqdm = tqdm(total=len(self.image_paths)/self.img_stride, desc='Loading dataset')
-        for i, image_path in enumerate(self.image_paths):
+        for i, (image_path, depth_path) in enumerate(zip(self.image_paths, self.depth_paths)):
 
             if ((i-self.initial_k) % self.img_stride) != 0 or i < self.initial_k or i > self.final_k:
                 continue
 
             self.tqdm.update(1)
 
-            # Parse rgb images
+            # Parse rgb/depth images
             image = cv2.imread(image_path)
+            depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+
+
 
             if self.resize_images:
                 w1, h1 = self.w1, self.h1
                 image = cv2.resize(image, (w1, h1))
                 image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA) # Required for Nerf Fusion, perhaps we can put it in there
 
+                depth = cv2.resize(depth, (w1, h1))
+
                 if self.viz:
                     cv2.imshow(f"Img Resized", image)
+                    cv2.imshow(f"Depth Resized", depth)
                     cv2.waitKey(1)
     
+            depth = depth[:, :, np.newaxis]
 
+            H, W, _  = depth.shape
+
+            assert(H == image.shape[0])
+            assert(W == image.shape[1])
             assert(3 == image.shape[2] or 4 == image.shape[2])
             assert(np.uint8 == image.dtype)
+            assert(1 == depth.shape[2])
+            assert(np.uint16 == depth.dtype)
 
+            depth = depth.astype(np.int32) 
 
             self.timestamps += [i]
             self.images     += [image]
+            self.depths     += [depth]
             subset_poses    += [self.poses[i]]
 
         self.tqdm.close()
@@ -136,11 +153,13 @@ class KITTIOdomDataset(Dataset):
         self.timestamps = np.array(self.timestamps)
         self.poses      = np.array(self.poses)
         self.images     = np.array(self.images)
+        self.depths     = np.array(self.depths)
         self.calibs     = np.array([self.calib]*len(self.images))
 
         N = len(self.timestamps)
         assert(N == self.poses.shape[0])
         assert(N == self.images.shape[0])
+        assert(N == self.depths.shape[0])
         assert(N == self.calibs.shape[0])
 
     def __len__(self):
@@ -158,7 +177,7 @@ class KITTIOdomDataset(Dataset):
                 "t_cams": self.timestamps[k0:k1],
                 "poses":  self.poses[k0:k1],
                 "images": self.images[k0:k1],
-                "depths": [None],
+                "depths": self.depths[k0:k1],
                 "calibs": self.calibs[k0:k1],
                 "is_last_frame": (k0 >= self.__len__() - 1),
                 }
@@ -187,6 +206,7 @@ class KITTIOdomDataset(Dataset):
             "h": self.calib.resolution.height,
             "aabb": self.calib.aabb,
             "aabb_scale": AABB_SCALE,
+            "integer_depth_scale": self.calib.depth_scale,
             "frames": [],
         }
 
@@ -197,8 +217,10 @@ class KITTIOdomDataset(Dataset):
             # Image
             ic(data_packet["k"])
             color_path = self.image_paths[data_packet["k"][0]]
+            depth_path = self.depth_paths[data_packet["k"][0]]
 
             relative_color_path = os.path.join("results", os.path.basename(color_path))
+            relative_depth_path = os.path.join("results", os.path.basename(depth_path))
 
             # Transform
             w2c = data_packet["poses"][0]
@@ -211,6 +233,7 @@ class KITTIOdomDataset(Dataset):
             poses_t += [w2c[:3,3].flatten()]
 
             frame = {"file_path": relative_color_path,  # "sharpness": b,
+                     "depth_path": relative_depth_path,
                      "transform_matrix": c2w.tolist()}
             out["frames"].append(frame)
 
