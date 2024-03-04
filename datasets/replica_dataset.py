@@ -25,8 +25,8 @@ class ReplicaDataset(Dataset):
         for i in range(len(self.image_paths)):
             line = lines[i]
             c2w = np.array(list(map(float, line.split()))).reshape(4, 4)
-            c2w[:3, 1] *= -1
-            c2w[:3, 2] *= -1
+            # c2w[:3, 1] *= -1
+            # c2w[:3, 2] *= -1
             import scipy.spatial.transform
             q = scipy.spatial.transform.Rotation.from_matrix(c2w[:3, :3]).as_quat()
             f.write(f'{i} {c2w[0, 3]} {c2w[1, 3]} {c2w[2, 3]} {q[0]} {q[1]} {q[2]} {q[3]}\n')
@@ -139,9 +139,10 @@ class ReplicaDataset(Dataset):
             self.calibs     += [self.calib]
             subset_poses    += [self.poses[i]]
 
-            # Early break if we've exceeded the buffer max
-            # if len(self.images) == self.args.buffer:
-            #     break
+            # Early break if we've exceeded the buffer max for nerf
+            if not self.args.slam:
+                if len(self.images) == self.args.buffer:
+                    break
 
         self.tqdm.close()
         self.poses = subset_poses

@@ -21,14 +21,26 @@ class TartanairDataset(Dataset):
         with open(path, "r") as f:
             lines = f.readlines()
         f = open(f'{self.args.output}/gt_traj.txt', 'w')
+        T = np.array([[0,0,-1,0],
+                      [0,0,0,0],
+                      [0,0,0,0],
+                      [0,0,0,1]], dtype=np.float32) 
+        # T_inv = np.linalg.inv(T)
+        R = np.array([[0,0,-1],
+                        [1,0,1],
+                        [0,-1,0]], dtype=np.float32)
         for i, line in enumerate(lines):
             data = line.split()
-            t = np.array([float(x) for x in data[:3]])
-            q = np.array([float(x) for x in data[3:]])
+            t = np.array([float(x) for x in data[:3]])[[1,2,0]]
+            q = np.array([float(x) for x in data[3:]])[[1,2,0,3]]
+            # t = np.array([float(x) for x in data[:3]])
+            # q = np.array([float(x) for x in data[3:]])
             c2w = np.eye(4)
             import scipy.spatial.transform
             c2w[:3,:3] = scipy.spatial.transform.Rotation.from_quat(q).as_matrix()
             c2w[:3, 3] = t
+            c2w[1:3]  *= -1
+
             f.write(f'{i} {t[0]} {t[1]} {t[2]} {q[0]} {q[1]} {q[2]} {q[3]}\n')
             w2c = np.linalg.inv(c2w)
             poses.append(w2c)
@@ -103,6 +115,7 @@ class TartanairDataset(Dataset):
 
             # Parse rgb/depth images
             image = cv2.imread(image_path)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             depth = np.load(depth_path)
 
 
@@ -110,7 +123,6 @@ class TartanairDataset(Dataset):
             if self.resize_images:
                 w1, h1 = self.w1, self.h1
                 image = cv2.resize(image, (w1, h1))
-                image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA) # Required for Nerf Fusion, perhaps we can put it in there
 
                 depth = cv2.resize(depth, (w1, h1))
 
@@ -119,13 +131,16 @@ class TartanairDataset(Dataset):
                     cv2.imshow(f"Depth Resized", depth)
                     cv2.waitKey(1)
     
+            # add alpha channel to image
+            H, W, _  = image.shape
+            image = np.concatenate([image, np.ones((H,W,1), dtype=np.uint8)*255], axis=2)
             depth = depth[:, :, np.newaxis]
 
             H, W, _  = depth.shape
 
             assert(H == image.shape[0])
             assert(W == image.shape[1])
-            assert(3 == image.shape[2] or 4 == image.shape[2])
+            assert(4 == image.shape[2])
             assert(np.uint8 == image.dtype)
             assert(1 == depth.shape[2])
             assert(np.float32 == depth.dtype)
@@ -137,19 +152,22 @@ class TartanairDataset(Dataset):
             self.depths     += [depth]
             subset_poses    += [self.poses[i]]
 
+            # Early break if we've exceeded the buffer max for nerf
+            if not self.args.slam:
+                if len(self.images) == self.args.buffer:
+                    break
+
         self.tqdm.close()
         self.poses = subset_poses
 
-        # poses_t = np.array([x[:3,3].flatten() for x in self.poses])
-        # delta_t = 2.0
-        # t_max = np.amax(poses_t, 0).flatten()
-        # t_min = np.amin(poses_t, 0).flatten()
-        # aabb = np.array([t_min-delta_t, t_max+delta_t]).tolist()
-        aabb = np.array([[-5]*3, [5]*3]).tolist()
+        poses_t = np.array([x[:3,3].flatten() for x in self.poses])
+        delta_t = 2.0
+        t_max = np.amax(poses_t, 0).flatten()
+        t_min = np.amin(poses_t, 0).flatten()
+        aabb = np.array([t_min-delta_t, t_max+delta_t]).tolist()
+        # aabb = np.array([[-5]*3, [5]*3]).tolist()
         self.calib.aabb = aabb
         ic(aabb)
-
-
         self.timestamps = np.array(self.timestamps)
         self.poses      = np.array(self.poses)
         self.images     = np.array(self.images)
@@ -192,7 +210,7 @@ class TartanairDataset(Dataset):
     def to_nerf_format(self):
         print("Exporting Replica dataset to Nerf")
         OUT_PATH = "transforms.json"
-        AABB_SCALE = 4
+        AABB_SCALE = 128
         out = {
             "fl_x": self.calib.camera_model.fx,
             "fl_y": self.calib.camera_model.fy,

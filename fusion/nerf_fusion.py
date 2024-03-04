@@ -52,7 +52,7 @@ class NerfFusion:
         self.iters = 1
         self.iters_if_none = 1
         self.total_iters = 0
-        self.stop_iters  = 10000
+        self.stop_iters  = self.args.stop_iters
         self.old_training_step = 0
 
         mode = ngp.TestbedMode.Nerf
@@ -130,11 +130,16 @@ class NerfFusion:
 
         packet["poses"]            = scale_offset_poses(np.linalg.inv(packet["poses"]), scale=scale, offset=offset)
         packet["images"]           = (packet["images"].astype(np.float32) / 255.0)
-        packet["depths"]           = (packet["depths"].astype(np.float32))
-        packet["gt_depths"]        = (packet["depths"].astype(np.float32))
         packet["depth_scale"]      = gt_depth_scale * scale
-        packet["depths_cov"]       = np.ones_like(packet["depths"])
         packet["depths_cov_scale"] = 1.0
+        if self.args.mask_type == "no_depth":
+            N, H, W, _ = packet["images"].shape
+            packet["depths"]           = np.ones((N, H, W), dtype=np.float32)*-1
+            packet["gt_depths"]        = np.ones((N, H, W), dtype=np.float32)*-1
+        else:
+            packet["depths"]           = (packet["depths"].astype(np.float32))
+            packet["gt_depths"]        = (packet["depths"].astype(np.float32))
+        packet["depths_cov"]       = np.ones_like(packet["depths"])
 
         self.send_data(packet)
         return False
@@ -287,6 +292,15 @@ class NerfFusion:
 
         for i, id in enumerate(frame_ids):
             self.ref_frames[id.item()] = [images[i], depths[i], gt_depths[i], depths_cov[i]]
+
+        # if self.viz:
+        #     first_image = images[0].copy()
+        #     cv2.putText(first_image, f"{frame_ids[0]}", (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        #     cv2.imshow("first image in batch", first_image)
+        #     last_image = images[-1].copy()
+        #     cv2.putText(last_image, f"{frame_ids[-1]}", (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        #     cv2.imshow("last image in batch", last_image)
+        #     cv2.waitKey(1)
 
         self.ngp.nerf.training.update_training_images(list(frame_ids),
                                                       list(poses[:, :3, :4]), 

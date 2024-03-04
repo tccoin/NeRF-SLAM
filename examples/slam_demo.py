@@ -46,6 +46,7 @@ def parse_args():
                             -`tsdf' classical tsdf-fusion using Open3D\n \
                             -`sigma' tsdf-fusion with uncertainty values (Rosinol22wacv)\n \
                             -`nerf' radiance field reconstruction using Instant-NGP.")
+    parser.add_argument("--stop_iters", type=int, default=10000, help="Number of iteration to train")
 
     # GUI ARGS
     parser.add_argument("--gui", action="store_true", help="Run O3D Gui, use when volume='tsdf'or'sigma'.")
