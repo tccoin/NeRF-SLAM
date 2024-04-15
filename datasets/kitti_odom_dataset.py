@@ -24,8 +24,6 @@ class KITTIOdomDataset(Dataset):
         for i, line in enumerate(lines):
             c2w = np.eye(4)
             c2w[:3,:] = np.array(list(map(float, line.split()))).reshape(3, 4)
-            # c2w[:3, 1] *= -1
-            # c2w[:3, 2] *= -1
             import scipy.spatial.transform
             q = scipy.spatial.transform.Rotation.from_matrix(c2w[:3, :3]).as_quat()
             f.write(f'{i} {c2w[0, 3]} {c2w[1, 3]} {c2w[2, 3]} {q[0]} {q[1]} {q[2]} {q[3]}\n')
@@ -60,6 +58,7 @@ class KITTIOdomDataset(Dataset):
         self.poses      = []
         self.images     = []
         self.calibs     = []
+        self.image_filenames  = []
 
         self.image_paths = sorted(glob.glob(f'{self.dataset_dir}/image_2/*.png')) #left
         self.poses       = self.load_poses(f'{self.dataset_dir}/groundtruth.txt')
@@ -101,16 +100,20 @@ class KITTIOdomDataset(Dataset):
 
             # Parse rgb images
             image = cv2.imread(image_path)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            self.image_filenames.append(image_path.split("/")[-1])
 
             if self.resize_images:
                 w1, h1 = self.w1, self.h1
                 image = cv2.resize(image, (w1, h1))
-                image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA) # Required for Nerf Fusion, perhaps we can put it in there
 
                 if self.viz:
                     cv2.imshow(f"Img Resized", image)
                     cv2.waitKey(1)
     
+            # add alpha channel to image
+            H, W, _  = image.shape
+            image = np.concatenate([image, np.ones((H,W,1), dtype=np.uint8)*255], axis=2)
 
             assert(3 == image.shape[2] or 4 == image.shape[2])
             assert(np.uint8 == image.dtype)
@@ -119,6 +122,11 @@ class KITTIOdomDataset(Dataset):
             self.timestamps += [i]
             self.images     += [image]
             subset_poses    += [self.poses[i]]
+
+            # Early break if we've exceeded the buffer max for nerf
+            if not self.args.slam:
+                if len(self.images) == self.args.buffer:
+                    break
 
         self.tqdm.close()
         self.poses = subset_poses
@@ -161,6 +169,7 @@ class KITTIOdomDataset(Dataset):
                 "depths": [None],
                 "calibs": self.calibs[k0:k1],
                 "is_last_frame": (k0 >= self.__len__() - 1),
+                "filenames": self.image_filenames[k0:k1]
                 }
 
     def _build_dataset_index(self):

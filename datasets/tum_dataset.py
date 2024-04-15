@@ -21,6 +21,7 @@ class TumDataset(Dataset):
         self.final_k = self.final_k if self.final_k != -1.0 and self.final_k < len(
             self.associations) else len(self.associations)
 
+        self.image_filenames = []
         self.parse_dataset()
 
     def parse_dataset(self):
@@ -56,6 +57,7 @@ class TumDataset(Dataset):
 
         timestamp = float(row[0])
         img = cv2.imread(os.path.join(self.dataset_dir, img_file_name))
+        self.image_filenames.append(img_file_name)
 
         assert img is not None
 
@@ -122,7 +124,8 @@ class TumDataset(Dataset):
         return {"k": k, "t_cams": t_cams, "images": images,
                 "cam_calibs": self.cam_calibs if not self.resize_images else self.cam_calibs_resized,
                 "gt_t0_t1": gt_t0_t1,
-                "is_last_frame": (k >= self.__len__() - 1)}
+                "is_last_frame": (k >= self.__len__() - 1),
+                "filenames": self.image_filenames[k0:k1]}
 
     def _get_cam_calib(self):
         # TODO: remove hardcoded

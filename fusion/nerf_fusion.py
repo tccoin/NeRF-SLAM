@@ -37,6 +37,8 @@ class NerfFusion:
 
         self.viz = False
 
+        self.__init = False
+
         # self.render_path_i = 0
         # import json
         # with open(os.path.join(args.dataset_dir, "transforms.json"), 'r') as f:
@@ -56,23 +58,49 @@ class NerfFusion:
         self.old_training_step = 0
 
         mode = ngp.TestbedMode.Nerf
+
+        self.ngp = ngp.Testbed(mode, 0) # NGP can only use device = 0
+
+        # self.init_npg_dataset(
+        #     aabb_scale=2
+        # )
+
+        self.mask_type = args.mask_type # "ours", "ours_w_thresh" or "raw", "no_depth"
+
+        # Keeps track of frame_ids being reconstructed
+        self.ref_frames = {}
+        self.ref_filenames = {}
+
+        self.mesh_renderer = None
+
+        self.anneal = False
+        self.anneal_every_iters = 200
+        self.annealing_rate = 0.95
+
+        self.evaluate = args.eval
+        self.eval_every_iters = 3000
+        if self.evaluate:
+            self.df = pandas.DataFrame(columns=['Iter', 'Dt','PSNR', 'L1', 'count'])
+
+        self.tqdm = tqdm(total=self.stop_iters)
+
+    def init_npg_dataset(self, aabb_scale=4, scale=1.0, offset=np.array([0.5, 0.5, 0.5])):
+        args = self.args
+
         configs_dir = os.path.join(ROOT_DIR, "thirdparty/instant-ngp/configs", "nerf")
 
         base_network = os.path.join(configs_dir, "base.json")
         network = args.network if args.network else base_network
         if not os.path.isabs(network):
             network = os.path.join(configs_dir, network)
-
-        self.ngp = ngp.Testbed(mode, 0) # NGP can only use device = 0
-
+    
         n_images = args.buffer
-        aabb_scale = 4
-        nerf_scale = 1.0 # Not needed unless you call self.ngp.load_training_data() or you render depths!
-        offset = np.array([np.inf, np.inf, np.inf]) # Not needed unless you call self.ngp.load_training_data()
+        # nerf_scale = 1 # Not needed unless you call self.ngp.load_training_data() or you render depths!
+        # offset = np.array([np.inf, np.inf, np.inf]) # Not needed unless you call self.ngp.load_training_data()
         render_aabb = ngp.BoundingBox(np.array([-np.inf, -np.inf, -np.inf]), np.array([np.inf, np.inf, np.inf])) # a no confundir amb self.ngp.aabb/raw_aabb/render_aabb
-        self.ngp.create_empty_nerf_dataset(n_images, nerf_scale, offset, aabb_scale, render_aabb)
+        self.ngp.create_empty_nerf_dataset(n_images, scale, offset, aabb_scale, render_aabb)
 
-        self.ngp.nerf.training.n_images_for_training = 0;
+        self.ngp.nerf.training.n_images_for_training = 0
 
         if args.gui:
             # Pick a sensible GUI resolution depending on arguments.
@@ -100,25 +128,6 @@ class NerfFusion:
         self.ngp.nerf.training.optimize_extrinsics = True
         self.ngp.nerf.training.depth_supervision_lambda = 1.0
         self.ngp.nerf.training.depth_loss_type = ngp.LossType.L2
-        self.mask_type = args.mask_type # "ours", "ours_w_thresh" or "raw", "no_depth"
-
-        # Keeps track of frame_ids being reconstructed
-        self.ref_frames = {}
-
-        self.mesh_renderer = None
-
-        self.anneal = False
-        self.anneal_every_iters = 200
-        self.annealing_rate = 0.95
-
-        self.evaluate = args.eval
-        self.eval_every_iters = 1000
-        if self.evaluate:
-            self.df = pandas.DataFrame(columns=['Iter', 'Dt','PSNR', 'L1', 'count'])
-
-        # Fit vol once to init gui
-        self.fit_volume_once()
-        self.tqdm = tqdm(total=self.stop_iters)
 
     def process_data(self, packet):
         # GROUND_TRUTH Fitting
@@ -140,7 +149,8 @@ class NerfFusion:
             packet["depths"]           = (packet["depths"].astype(np.float32))
             packet["gt_depths"]        = (packet["depths"].astype(np.float32))
         packet["depths_cov"]       = np.ones_like(packet["depths"])
-
+        packet["scale"]            = scale
+        packet["offset"]           = offset
         self.send_data(packet)
         return False
 
@@ -170,13 +180,14 @@ class NerfFusion:
         idepths_up     = slam_packet["cam0_idepths_up"]
         depths_cov_up  = slam_packet["cam0_depths_cov_up"]
         calibs         = slam_packet["calibs"]
+        filenames      = slam_packet["filenames"]
         gt_depths      = slam_packet["gt_depths"]
 
         calib = calibs[0]
         scale, offset = get_scale_and_offset(calib.aabb) # if we happen to change aabb, we are screwed...
         gt_depth_scale = calib.depth_scale
-        scale = 1.0 # We manually set the scale to 1.0 bcs the automatic get_scale_and_offset sets the scale too small for high-quality recons.
-        offset = np.array([0.0, 0.0, 0.0])
+        # scale = 1 # We manually set the scale to 1.0 bcs the automatic get_scale_and_offset sets the scale too small for high-quality recons.
+        # offset = np.array([0,0,0])
 
         # Mask out depths that have too much uncertainty
         if self.mask_type == "ours":
@@ -188,6 +199,7 @@ class NerfFusion:
             idepths_up[masks] = -1.0
         elif self.mask_type == "no_depth":
             idepths_up[...] = -1.0
+            depths_cov_up[...] = 1.0
         else:
             raise NotImplementedError(f"Unknown mask type: {self.mask_type}")
 
@@ -227,17 +239,20 @@ class NerfFusion:
                     "poses":            world_T_cam0,  # needs to be c2w
                     "images":           images.contiguous().cpu().numpy(),
                     "depths":           depths.contiguous().cpu().numpy(),
-                    "depth_scale":      scale, # This should be scale, since we scale the poses... # , 1.0, #np.mean(depths), #* self.ngp.nerf.training.dataset.scale,
+                    "depth_scale":      scale,
                     "depths_cov":       depths_cov.contiguous().cpu().numpy(), # do not use up
-                    "depths_cov_scale": scale, # , 1.0, #np.mean(depths), #* self.ngp.nerf.training.dataset.scale, 
+                    "depths_cov_scale": scale,
                     "gt_depths":        gt_depths.contiguous().cpu().numpy(), 
                     "calibs":           calibs,
+                    "filenames":        filenames,
+                    "scale":           scale,
+                    "offset":           offset
                 }
 
         # Uncomment in case you want to use ground-truth poses
-        # batch["poses"] = np.linalg.inv(gt_poses.cpu().numpy())
-        # batch["depths"] = (gt_depths.permute(0,2,3,1).float()).contiguous().cpu().numpy()
-        # batch["depth_scale"] = 4.5777065690089265e-05 * self.ngp.nerf.training.dataset.scale
+        # data_packets["poses"] = np.linalg.inv(gt_poses.cpu().numpy())
+        # data_packets["depths"] = gt_depths.contiguous().cpu().numpy()
+        # data_packets["depth_scale"] = 1
         # gt_pose = np.linalg.inv(gt_poses[0].cpu().numpy()) # c2w gt poses in ngp format
 
         self.send_data(data_packets)
@@ -255,11 +270,12 @@ class NerfFusion:
                     #self.ngp.set_camera_to_training_view(self.ngp.nerf.training.n_images_for_training-1) 
                 else:
                     raise NotImplementedError(f"process_{name} not implemented...")
-            if fit:
+            if fit and self.__init:
                 self.fit_volume()
         else:
             #print("No packet received in fusion module.")
-            self.fit_volume()
+            if self.__init:
+                self.fit_volume()
 
         # Set the gui to a given pose, and follow the gt pose, but modulate the speed somehow...
         # a) allow to provide a pose (from gt)
@@ -283,6 +299,7 @@ class NerfFusion:
         depth_cov_scale = batch["depths_cov_scale"]
         gt_depths       = batch["gt_depths"]
         calib           = batch["calibs"][0]  # assumes all the same calib
+        filenames       = batch["filenames"]
 
         intrinsics = calib.camera_model.numpy()
         resolution = calib.resolution.numpy()
@@ -292,6 +309,7 @@ class NerfFusion:
 
         for i, id in enumerate(frame_ids):
             self.ref_frames[id.item()] = [images[i], depths[i], gt_depths[i], depths_cov[i]]
+            self.ref_filenames[id.item()] = filenames[i]
 
         # if self.viz:
         #     first_image = images[0].copy()
@@ -302,6 +320,16 @@ class NerfFusion:
         #     cv2.imshow("last image in batch", last_image)
         #     cv2.waitKey(1)
 
+        if not self.__init:
+            ic(calib.aabb)
+            self.init_npg_dataset(
+                aabb_scale=calib.aabb_scale,
+                scale=batch["scale"],
+                offset=batch["offset"]
+            )
+            self.print_dataset_info()
+            self.__init = True
+
         self.ngp.nerf.training.update_training_images(list(frame_ids),
                                                       list(poses[:, :3, :4]), 
                                                       list(images), 
@@ -310,11 +338,10 @@ class NerfFusion:
 
         # On the first frame, set the viewpoint
         if self.ngp.nerf.training.n_images_for_training == 1:
-            self.ngp.set_camera_to_training_view(0) 
+            self.ngp.set_camera_to_training_view(0)
 
 
     def fit_volume(self):
-        self.tqdm.update(self.iters)
         self.tqdm.set_description(f"Fitting volume for {self.iters} iters")
         #print(f"Fitting volume for {self.iters} iters")
         self.fps = 30
@@ -331,7 +358,8 @@ class NerfFusion:
         if self.evaluate and self.total_iters % self.eval_every_iters == 0:
             print("Evaluate.")
             self.eval_gt_traj()
-        self.total_iters += 1
+        self.tqdm.update(self.ngp.training_step-self.total_iters)
+        self.total_iters = self.ngp.training_step
 
     def evaluate_depth(self):
         self.mesh_renderer.render_depth()
@@ -403,6 +431,17 @@ class NerfFusion:
         #ic(self.ngp.nerf.training.dataset.transforms[0].start)
         #ic(self.ngp.nerf.training.dataset.transforms[0].end)
 
+    def save_images(self, img, file_path):
+        img = img.copy()
+        def linear_to_srgb(img):
+            limit = 0.0031308
+            return np.where(img > limit, 1.055 * (img ** (1.0 / 2.4)) - 0.055, 12.92 * img)
+        img[...,0:3] = np.divide(img[...,0:3], img[...,3:4], out=np.zeros_like(img[...,0:3]), where=img[...,3:4] != 0)
+        img[...,0:3] = linear_to_srgb(img[...,0:3])
+        img = (np.clip(img, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+        img = img[...,0:3][:, :, ::-1]
+        cv2.imwrite(file_path, img)
+
     def eval_gt_traj(self):
         # ic(self.total_iters)
 
@@ -442,6 +481,10 @@ class NerfFusion:
             self.ngp.render_mode = ngp.Shade
             ref_image = self.ref_frames[i][0]
             est_image = self.ngp.render(ref_image.shape[1], ref_image.shape[0], spp, linear, fps=fps)
+
+            # save est_image
+            self.save_images(est_image, f"{self.args.output}/images/{self.ref_filenames[i]}")
+            self.save_images(ref_image, f"{self.args.output}/images/ref_{self.ref_filenames[i]}")
 
             if self.viz:
                 cv2.imshow("Color Error", np.sum(ref_image - est_image, axis=-1))

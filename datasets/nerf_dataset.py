@@ -40,6 +40,7 @@ class NeRFDataset(Dataset):
             self.json = json.load(f)
 
         self.calib = self.get_cam_calib()
+        self.image_filenames  = []
 
         self.resize_images = False
         if self.calib.resolution.total() > 640*640:
@@ -84,6 +85,7 @@ class NeRFDataset(Dataset):
             self.image_paths.append([i, image_path])
             self.depth_paths += [depth_path]
             self.w2c += [w2c]
+            self.image_filenames.append(image_path.split("/")[-1])
 
         # Sort paths chronologically
         if os.path.splitext(os.path.basename(self.image_paths[0][1]))[0].isdigit():
@@ -118,7 +120,7 @@ class NeRFDataset(Dataset):
 
             # Parse rgb/depth images
             image = cv2.imread(image_path) # H, W, C=4
-            image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA) # Required for Nerf Fusion, perhaps we can put it in there
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGBA)
             if depth_path:
                 depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)[..., None] # H, W, C=1
             else:
@@ -159,6 +161,7 @@ class NeRFDataset(Dataset):
                 "depths": np.array(depths),
                 "calibs": np.array(calibs),
                 "is_last_frame": (i >= self.__len__() - 1),
+                "filenames": self.image_filenames[k0:k1]
                 }
 
     def __len__(self):

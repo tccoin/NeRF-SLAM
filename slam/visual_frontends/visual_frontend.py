@@ -182,7 +182,7 @@ class RaftVisualFrontend(VisualFrontend):
         self.cam0_intrinsics = torch.zeros(self.buffer, 4,       dtype=torch.float, device=self.device).share_memory_()
         self.gt_poses        = torch.zeros(self.buffer, 4, 4,    dtype=torch.float, device=self.device).share_memory_()
         self.gt_depths       = torch.zeros(self.buffer, 1, h, w, dtype=torch.float, device=self.device).share_memory_()
-
+        self.filenames       = {}
         ### State attributes ###
         self.cam0_T_world          = torch.zeros(self.buffer, 7,   dtype=torch.float, device=self.device).share_memory_()
         self.world_T_body        = torch.zeros(self.buffer, 7,   dtype=torch.float, device=self.device).share_memory_()
@@ -275,7 +275,7 @@ class RaftVisualFrontend(VisualFrontend):
             self.cam0_timestamps[self.kf_idx] = torch.tensor(batch["t_cams"][0],          device=self.device)
             self.cam0_images[self.kf_idx]     = torch.tensor(batch["images"][0],          device=self.device)[..., :3].permute(2,0,1)
             self.cam0_intrinsics[self.kf_idx] = (1.0 / self.dsf) * torch.tensor(batch["calibs"][0].camera_model.numpy(), device=self.device)
-
+            self.filenames[self.kf_idx]       = batch["filenames"][0]
             # Initialize the state
             # Compute its dense features for next iteration
             self.features_imgs[self.kf_idx] = self.__feature_encoder(imgs_norm_k)
@@ -323,6 +323,7 @@ class RaftVisualFrontend(VisualFrontend):
         self.contexts_imgs[self.kf_idx], self.cst_contexts_imgs[self.kf_idx] = self.__context_encoder(imgs_norm_k)
         self.kf_idx_to_f_idx[self.kf_idx] = k
         self.f_idx_to_kf_idx[k]           = self.kf_idx
+        self.filenames[self.kf_idx]       = batch["filenames"][0]
 
         # Build the flow graph: ii -> jj edges
         # TODO: for now just do a chain
@@ -552,6 +553,7 @@ class RaftVisualFrontend(VisualFrontend):
         self.cam0_depths_cov[kf_idx]    = self.cam0_depths_cov[kf_idx+1]
         self.cam0_idepths_sensed[kf_idx] = self.cam0_idepths_sensed[kf_idx+1]
         self.cam0_intrinsics[kf_idx]    = self.cam0_intrinsics[kf_idx+1]
+        self.filenames[kf_idx]          = self.filenames[kf_idx+1]
 
         self.features_imgs[kf_idx]     = self.features_imgs[kf_idx+1]
         self.contexts_imgs[kf_idx]     = self.contexts_imgs[kf_idx+1]
@@ -1176,7 +1178,7 @@ class RaftVisualFrontend(VisualFrontend):
                 L = torch.linalg.cholesky(torch.as_tensor(H, device=self.device, dtype=torch.float))# from double to float...
             except Exception as e:
                 print(e)
-            if L is not None:
+            if L is not None and not torch.isnan(L).any():
                 identity = torch.eye(L.shape[0], device=L.device) # L has shape (PD,PD) 
                 L_inv = torch.linalg.solve_triangular(L, identity, upper=False)
                 if torch.isnan(L_inv).any():
@@ -1367,15 +1369,13 @@ class RaftVisualFrontend(VisualFrontend):
             depths_cov_up      = torch.index_select(self.cam0_depths_cov_up, 0, viz_index)  # do not use up
             images             = torch.index_select(self.cam0_images, 0, viz_index)
             intrinsics         = torch.index_select(self.cam0_intrinsics, 0, viz_index) # are these the up or down intrinsics? (down!)
-
+            filenames         = [self.filenames[i] for i in viz_index.to("cpu").numpy()]
             if self.args.multi_gpu:
                 # We cannot send viz_out in our device, if the receiving end is in another device.
                 # Need to cpu-transer, which is super slow.
                 out_device = "cpu"
             else:
                 out_device = self.device
-
-            # ic(out_device)
 
             viz_out = {"cam0_poses":          cam0_T_world.to(device=out_device),
                        "gt_poses":            gt_poses.to(device=out_device),
@@ -1394,7 +1394,8 @@ class RaftVisualFrontend(VisualFrontend):
                        "viz_idx":             viz_index.to(device=out_device),
                        "kf_idx":              self.kf_idx,
                        "kf_idx_to_f_idx":     self.kf_idx_to_f_idx,
-                       "is_last_frame":       batch["is_last_frame"]
+                       "is_last_frame":       batch["is_last_frame"],
+                       "filenames":           filenames
                       }
             self.viz_idx[:] = False
             

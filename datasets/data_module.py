@@ -44,6 +44,12 @@ class DataModule(MIMOPipelineModule):
         elif self.name == "tartanair":
             from datasets.tartanair_dataset import TartanairDataset
             self.dataset = TartanairDataset(self.args, self.device)
+        elif self.name == "underwater_cave":
+            from datasets.underwater_cave_dataset import UnderwaterCaveDataset
+            self.dataset = UnderwaterCaveDataset(self.args, self.device)
+        elif self.name == "rgb":
+            from datasets.rgb_dataset import RGBDataset
+            self.dataset = RGBDataset(self.args, self.device)
         elif self.name == "real":
             from datasets.real_sense_dataset import RealSenseDataset
             self.dataset = RealSenseDataset(self.args, self.device)

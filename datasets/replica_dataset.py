@@ -62,6 +62,7 @@ class ReplicaDataset(Dataset):
         self.images     = []
         self.depths     = []
         self.calibs     = []
+        self.image_filenames  = []
 
         self.image_paths = sorted(glob.glob(f'{self.dataset_dir}/results/frame*.jpg'))
         self.depth_paths = sorted(glob.glob(f'{self.dataset_dir}/results/depth*.png'))
@@ -105,6 +106,7 @@ class ReplicaDataset(Dataset):
             # Parse rgb/depth images
             image = cv2.imread(image_path)
             depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+            self.image_filenames.append(image_path.split("/")[-1])
 
             #depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)[..., None] # H, W, C=1            
 
@@ -177,6 +179,7 @@ class ReplicaDataset(Dataset):
                 "depths": self.depths[k0:k1],
                 "calibs": self.calibs[k0:k1],
                 "is_last_frame": (k0 >= self.__len__() - 1),
+                "filenames": self.image_filenames[k0:k1]
                 }
 
     # Up to you how you index the dataset depending on your training procedure

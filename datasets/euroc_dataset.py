@@ -115,6 +115,7 @@ class EurocDataset(Dataset):
 
     def parse_metadata(self, dataset_dir):
         mav_dir = os.path.join(dataset_dir, 'mav0')
+        self.image_filenames  = []
 
         # Cam0
         cam0_dir = os.path.join(mav_dir, 'cam0')
@@ -229,6 +230,7 @@ class EurocDataset(Dataset):
             # Get image
             image = cv2.imread(os.path.join(self.cam0_data_dir, img0_file_name))
 
+            self.image_filenames.append(img0_file_name)
             if self.viz:
                 cv2.imshow("Img", image)
                 cv2.waitKey(1)
@@ -276,6 +278,7 @@ class EurocDataset(Dataset):
                 "poses":  np.array(poses),
                 "calibs": np.array(calibs),
                 "is_last_frame": (k0 >= self.__len__() - 1),
+                "filenames": self.image_filenames[k0:k1]
                 }
 
     def __len__(self):

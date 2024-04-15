@@ -34,7 +34,7 @@ def parse_args():
                         help="Path to the dataset directory",
                         default="/home/tonirv/Datasets/euroc/V1_01_easy")
     parser.add_argument('--dataset_name', type=str, default='euroc',
-                        choices=['euroc', 'nerf', 'replica', 'real', 'kitti_odom', 'tartanair'],
+                        choices=['euroc', 'nerf', 'replica', 'real', 'rgb', 'kitti_odom', 'tartanair', 'underwater_cave'],
                         help='Dataset format to use.')
 
     parser.add_argument("--mask_type", type=str, default='ours', choices=['no_depth', 'raw', 'ours', 'ours_w_thresh'])
@@ -219,6 +219,7 @@ def run(args):
 if __name__ == '__main__':
     args = parse_args()
     os.makedirs(args.output, exist_ok=True)
+    os.makedirs(args.output+'/images', exist_ok=True)
 
     torch.multiprocessing.set_start_method('spawn')
     torch.cuda.empty_cache()

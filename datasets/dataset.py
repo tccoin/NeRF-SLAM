@@ -113,7 +113,7 @@ class RadTanDistortionModel(DistortionModel):
         return np.array([self.k1, self.k2, self.p1, self.p2])
 
 class CameraCalibration:
-    def __init__(self, body_T_cam, camera_model, distortion_model, rate_hz, resolution, aabb, depth_scale) -> None:
+    def __init__(self, body_T_cam, camera_model, distortion_model, rate_hz, resolution, aabb, depth_scale, aabb_scale=4) -> None:
         self.body_T_cam = body_T_cam
         self.camera_model = camera_model
         self.distortion_model = distortion_model
@@ -121,6 +121,7 @@ class CameraCalibration:
         self.resolution = resolution
         self.aabb = aabb
         self.depth_scale = depth_scale
+        self.aabb_scale = aabb_scale
 
 class ImuCalibration:
     def __init__(self, body_T_imu, a_n, a_b, g_n, g_b, rate_hz, imu_integration_sigma, imu_time_shift, n_gravity) -> None:
